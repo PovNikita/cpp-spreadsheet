@@ -22,8 +22,8 @@ public:
     FormulaAST(FormulaAST&&) = default;
     FormulaAST& operator=(FormulaAST&&) = default;
     ~FormulaAST();
-
-    double Execute(/*добавьте нужные аргументы*/ args) const;
+    
+    double Execute(const SheetInterface &sheet) const;
     void PrintCells(std::ostream& out) const;
     void Print(std::ostream& out) const;
     void PrintFormula(std::ostream& out) const;
@@ -36,6 +36,15 @@ public:
         return cells_;
     }
 
+    std::vector<Position> GetReferencedCells() const {
+        std::vector<Position> ref_cells;
+        for(Position pos : cells_)
+        {
+            ref_cells.push_back(pos);
+        }
+        return ref_cells;
+    }
+    
 private:
     std::unique_ptr<ASTImpl::Expr> root_expr_;
 

@@ -26,11 +26,21 @@ struct Position {
     static const Position NONE;
 };
 
+struct PositionHasher {
+    size_t operator()(const Position position) const {
+        return std::hash<std::size_t>{}(static_cast<size_t>(position.row) + static_cast<size_t>(position.col) * 100000);
+    }
+};
+
 struct Size {
     int rows = 0;
     int cols = 0;
 
-    bool operator==(Size rhs) const;
+    Size(int row_n, int cols_n) : rows(row_n), cols(cols_n) {}
+    Size(const Size&) = default;
+
+    bool operator==(const Size rhs) const;
+    Size& operator=(Size rhs);
 };
 
 // Описывает ошибки, которые могут возникнуть при вычислении формулы.
@@ -39,7 +49,7 @@ public:
     enum class Category {
         Ref,    // ссылка на ячейку с некорректной позицией
         Value,  // ячейка не может быть трактована как число
-        Div0,  // в результате вычисления возникло деление на ноль
+        Arithmetic,  // в результате вычисления возникло деление на ноль
     };
 
     FormulaError(Category category);
@@ -98,6 +108,9 @@ public:
     // ячеек. В случае текстовой ячейки список пуст.
     virtual std::vector<Position> GetReferencedCells() const = 0;
 };
+
+//std::ostream& operator<<(std::ostream& output, CellInterface::Value value);
+std::ostream& operator<<(std::ostream& output, const CellInterface::Value& value);
 
 inline constexpr char FORMULA_SIGN = '=';
 inline constexpr char ESCAPE_SIGN = '\'';
