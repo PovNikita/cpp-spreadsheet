@@ -10,7 +10,7 @@ class Cell::Impl {
 public:
     Impl() = default;
     virtual bool IsEmpty() const = 0;
-    virtual void Set(std::string str) = 0;
+    virtual void Set(std::string&& str) = 0;
     virtual std::string GetText() const = 0;
     virtual CellInterface::Value GetValue() const = 0;
     virtual std::vector<Position> GetReferencedCells()const = 0;
@@ -23,7 +23,7 @@ public:
     bool IsEmpty() const override{
         return true;
     }
-    void Set(std::string str) override{
+    void Set(std::string&& str) override{
         user_defined_str_ = std::move(str);
     }
     std::string GetText() const override{
@@ -48,7 +48,7 @@ public:
     {
         return false;
     }
-    void Set(std::string str) override
+    void Set(std::string&& str) override
     {
         user_defined_str_ = std::move(str);
     }
@@ -79,7 +79,7 @@ public:
     bool IsEmpty() const override {
         return false;
     }
-    void Set(std::string str) override {
+    void Set(std::string&& str) override {
         using namespace std::literals;
         SetImpl(str);
         user_defined_str_ = "="s;
@@ -144,10 +144,17 @@ void FillChildCellsSet(std::unordered_set<Position, PositionHasher>& child_cells
     }
 }
 
-void Cell::SetFormulaImpl(std::string& text) {
+void Cell::SetFormulaImpl(std::string&& text) {
     std::unique_ptr<Impl> temp_impl = std::move(impl_);
     impl_ = std::make_unique<FormulaImpl>(sheet_);
-    impl_->Set(text);
+    try {
+        impl_->Set(std::move(text));
+    }
+    catch (...)
+    {
+        impl_ = std::move(temp_impl);
+        throw;
+    }
     std::unordered_set<Position, PositionHasher> temp_child_cell;
     temp_child_cell = std::move(child_cells_);
     child_cells_.clear();
@@ -161,18 +168,22 @@ void Cell::SetFormulaImpl(std::string& text) {
     }
 }
 
-Cell::Cell(SheetInterface& sheet, Position pos, std::string text)
+Cell::Cell(SheetInterface& sheet, Position pos, std::string&& text)
     : sheet_(sheet)
     , current_position_(pos)
 {
-    Set(text);
+    Set(std::move(text));
+    for(Position pos : GetReferencedCells())
+    {
+        dynamic_cast<Cell*>(sheet_.GetCell(pos))->parents_cells_.insert(current_position_);
+    }
 }
 
 Cell::~Cell() {
     //Delete Cell
 }
 
-void Cell::Set(std::string& text) {
+void Cell::Set(std::string&& text) {
     InvalidateCache();
     if(text.size() == 0)
     {
@@ -181,20 +192,19 @@ void Cell::Set(std::string& text) {
     }
     if(IsTextFormula(text))
     {
-        SetFormulaImpl(text);
+        SetFormulaImpl(std::move(text));
         return;
     }
     impl_ = std::make_unique<TextImpl>();
-    impl_->Set(text);
+    impl_->Set(std::move(text));
 }
 
 void Cell::Clear() {
-    InvalidateCache();
-    impl_ = std::make_unique<EmptyImpl>();
+    Set(std::move(""s));
 }
 
 Cell::Value Cell::GetValue() const {
-    if(!IsValid())
+    if(!IsValidCache())
     {
         if(IsTextFormula(impl_->GetText())) {
             std::unordered_set<Position, PositionHasher> visited;
@@ -216,7 +226,7 @@ std::vector<Position> Cell::GetReferencedCells() const {
     return impl_->GetReferencedCells();
 }
 
-bool Cell::IsValid() const
+bool Cell::IsValidCache() const
 {
     if(cache_.has_value())
     {
@@ -227,25 +237,20 @@ bool Cell::IsValid() const
 
 void Cell::InvalidateCache()
 {
-    if(IsValid())
+    if(IsValidCache())
     {
-        std::unordered_set<Position, PositionHasher> visited_cells;
-        InvalidateCacheImpl(visited_cells);
+        InvalidateCacheImpl();
     }
 }
 
-void Cell::InvalidateCacheImpl(std::unordered_set<Position, PositionHasher>& visited_cells)
+void Cell::InvalidateCacheImpl()
 {
     cache_.reset();
-    visited_cells.insert(current_position_);
     if(!parents_cells_.empty())
     {
         for(auto cell_pos : parents_cells_)
         {
-            if(visited_cells.find(cell_pos) == visited_cells.end())
-            {
-                dynamic_cast<Cell*>(sheet_.GetCell(cell_pos))->InvalidateCache();
-            }
+            dynamic_cast<Cell*>(sheet_.GetCell(cell_pos))->InvalidateCache();
         }
     }
 }
@@ -267,7 +272,6 @@ bool Cell::CheckCycleDependencyImpl(std::unordered_set<Position, PositionHasher>
     }
     handling_cells.insert(current_position_);
     visited.insert(current_position_);
-
     if(!child_cells_.empty())
     {
         for(auto cell_pos : child_cells_)
@@ -279,7 +283,6 @@ bool Cell::CheckCycleDependencyImpl(std::unordered_set<Position, PositionHasher>
             }
         }
     }
-    visited.erase(current_position_);
     handling_cells.erase(current_position_);
     return false;
 }
@@ -295,7 +298,7 @@ CellInterface::Value Cell::CalculateValuesImpl(std::unordered_set<Position, Posi
                 return FormulaError(FormulaError::Category::Ref);
             }
             Cell* cell = dynamic_cast<Cell*>(sheet_.GetCell(cell_pos));
-            if(!cell->IsValid())
+            if(!cell->IsValidCache())
             {
                 if(visited.find(cell_pos) == visited.end())
                 {

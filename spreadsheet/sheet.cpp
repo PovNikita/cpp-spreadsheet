@@ -19,11 +19,15 @@ void Sheet::SetCell(Position pos, std::string text) {
     }
     if(GetCell(pos) == nullptr)
     {
-        sheet_[pos] = std::make_unique<Cell>(*this, pos, text);
+        sheet_[pos] = std::make_unique<Cell>(*this, pos, std::move(text));
+    }
+    else if(sheet_[pos]->GetText() == text)
+    {
+        return;
     }
     else
     {
-        dynamic_cast<Cell*>(sheet_[pos].get())->Set(text);
+        dynamic_cast<Cell*>(sheet_[pos].get())->Set(std::move(text));
     }
     UpdateSize(pos, true);
 

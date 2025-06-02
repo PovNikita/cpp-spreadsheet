@@ -11,7 +11,7 @@
 
 class Cell : public CellInterface {
 public:
-    explicit Cell(SheetInterface& sheet,  Position pos, std::string text = "");
+    explicit Cell(SheetInterface& sheet,  Position pos, std::string&& text);
     ~Cell();
 
     void Clear();
@@ -19,9 +19,9 @@ public:
     std::string GetText() const override;
     std::vector<Position> GetReferencedCells() const override;
 
-    void Set(std::string& text);
+    void Set(std::string&& text);
 
-    bool IsValid() const;
+    bool IsValidCache() const;
     void InvalidateCache();
 
     bool IsThereCycleDependency();
@@ -39,14 +39,14 @@ private:
     std::unordered_set<Position, PositionHasher> parents_cells_;
     mutable std::optional<CellInterface::Value> cache_;
 
-    void InvalidateCacheImpl(std::unordered_set<Position, PositionHasher>& visited_cells);
+    void InvalidateCacheImpl();
 
     std::unordered_set<Position, PositionHasher> child_cells_;
 
     bool CheckCycleDependencyImpl(  std::unordered_set<Position, PositionHasher>& visited, 
                                     std::unordered_set<Position, PositionHasher>& handling_cells);
     
-    void SetFormulaImpl(std::string& text);
+    void SetFormulaImpl(std::string&& text);
 
     CellInterface::Value CalculateValuesImpl(std::unordered_set<Position, PositionHasher>& visited) const;
 
