@@ -25,6 +25,9 @@ public:
     void InvalidateCache();
 
     bool IsThereCycleDependency();
+    void EraseParentCellFromAllRefferencedCells();
+    bool IsThisCellPartOfFormula();
+    bool IsFormulaCell();
 
 private:
     class Impl;
@@ -48,7 +51,12 @@ private:
     
     void SetFormulaImpl(std::string&& text);
 
-    CellInterface::Value CalculateValuesImpl(std::unordered_set<Position, PositionHasher>& visited) const;
+    void SetEmptyCellImpl();
+    void SetTextCellImpl(std::string&& text);
+
+    CellInterface::Value CalculateValuesImpl() const;
 
     bool IsTextFormula(std::string_view text) const;
+
+    void EraseRefToThisCellFromChildCell(Position child_cell_pos);
 };

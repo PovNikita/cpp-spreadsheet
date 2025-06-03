@@ -369,4 +369,15 @@ int main() {
     RUN_TEST(tr, TestCellReferences);
     RUN_TEST(tr, TestFormulaIncorrect);
     RUN_TEST(tr, TestCellCircularReferences);
+
+    auto sheet = CreateSheet();
+    sheet->SetCell("A1"_pos, "=A2 + A3 + A4");
+    sheet->SetCell("A2"_pos, "1");
+    sheet->SetCell("A3"_pos, "2");
+    sheet->SetCell("A4"_pos, "3");
+    sheet->GetCell("A1"_pos)->GetValue();
+    sheet->SetCell("A2"_pos, "");
+    sheet->ClearCell("A1"_pos);
+    
+    //sheet->GetCell("A1"_pos)->GetValue();
 }

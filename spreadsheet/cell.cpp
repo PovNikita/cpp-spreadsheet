@@ -97,9 +97,12 @@ public:
         catch(...)
         {
             value_ = FormulaError(FormulaError::Category::Arithmetic);
-            return std::get<FormulaError>(value_);
         }
-        return std::get<double>(value_);
+        if(std::holds_alternative<double>(value_))
+        {
+            return std::get<double>(value_);
+        }
+        return std::get<FormulaError>(value_);
 
     }
 
@@ -166,6 +169,18 @@ void Cell::SetFormulaImpl(std::string&& text) {
         impl_ = std::move(temp_impl);
         throw CircularDependencyException("There is a circular dependency");
     }
+    for(Position pos : GetReferencedCells())
+    {
+        dynamic_cast<Cell*>(sheet_.GetCell(pos))->parents_cells_.insert(current_position_);
+    }
+    for(Position pos : temp_child_cell)
+    {
+        if(child_cells_.find(pos) == child_cells_.end())
+        {
+            //Если ячейки нет в новой формуле, то удалить в этой ячейке упоминание на текущую
+            EraseRefToThisCellFromChildCell(pos);
+        }
+    }
 }
 
 Cell::Cell(SheetInterface& sheet, Position pos, std::string&& text)
@@ -173,30 +188,42 @@ Cell::Cell(SheetInterface& sheet, Position pos, std::string&& text)
     , current_position_(pos)
 {
     Set(std::move(text));
-    for(Position pos : GetReferencedCells())
-    {
-        dynamic_cast<Cell*>(sheet_.GetCell(pos))->parents_cells_.insert(current_position_);
-    }
 }
 
 Cell::~Cell() {
-    //Delete Cell
+}
+
+void Cell::SetEmptyCellImpl() {
+    impl_ = std::make_unique<EmptyImpl>();
+    child_cells_.clear();
+}
+
+void Cell::SetTextCellImpl(std::string&& text) {
+    impl_ = std::make_unique<TextImpl>();
+    impl_->Set(std::move(text));
+    child_cells_.clear();
+    cache_ = impl_->GetValue();
 }
 
 void Cell::Set(std::string&& text) {
     InvalidateCache();
-    if(text.size() == 0)
-    {
-        impl_ = std::make_unique<EmptyImpl>();
-        return;
-    }
+
     if(IsTextFormula(text))
     {
         SetFormulaImpl(std::move(text));
         return;
     }
-    impl_ = std::make_unique<TextImpl>();
-    impl_->Set(std::move(text));
+    if(impl_ && IsTextFormula(impl_->GetText()))
+    {
+        //Если формульная ячейка становится текстовой или пустой, то разрушаются зависимость этой ячейки от других
+        EraseParentCellFromAllRefferencedCells();
+    }
+    if(text.size() == 0)
+    {
+        SetEmptyCellImpl();
+        return;
+    }
+    SetTextCellImpl(std::move(text));
 }
 
 void Cell::Clear() {
@@ -207,8 +234,7 @@ Cell::Value Cell::GetValue() const {
     if(!IsValidCache())
     {
         if(IsTextFormula(impl_->GetText())) {
-            std::unordered_set<Position, PositionHasher> visited;
-            CalculateValuesImpl(visited);
+            CalculateValuesImpl();
         }
         else
         {
@@ -239,18 +265,21 @@ void Cell::InvalidateCache()
 {
     if(IsValidCache())
     {
+        cache_.reset();
         InvalidateCacheImpl();
     }
 }
 
 void Cell::InvalidateCacheImpl()
 {
-    cache_.reset();
     if(!parents_cells_.empty())
     {
         for(auto cell_pos : parents_cells_)
         {
-            dynamic_cast<Cell*>(sheet_.GetCell(cell_pos))->InvalidateCache();
+            auto cell_p = sheet_.GetCell(cell_pos);
+
+                dynamic_cast<Cell*>(cell_p)->InvalidateCache();
+
         }
     }
 }
@@ -276,10 +305,14 @@ bool Cell::CheckCycleDependencyImpl(std::unordered_set<Position, PositionHasher>
     {
         for(auto cell_pos : child_cells_)
         {
-            bool is_cycle_dep = dynamic_cast<Cell*>(sheet_.GetCell(cell_pos))->CheckCycleDependencyImpl(visited, handling_cells);
-            if(is_cycle_dep)
+            auto cell_p = sheet_.GetCell(cell_pos);
+            if(cell_p != nullptr)
             {
-                return true;
+                bool is_cycle_dep = dynamic_cast<Cell*>(cell_p)->CheckCycleDependencyImpl(visited, handling_cells);
+                if(is_cycle_dep)
+                {
+                    return true;
+                }
             }
         }
     }
@@ -287,7 +320,7 @@ bool Cell::CheckCycleDependencyImpl(std::unordered_set<Position, PositionHasher>
     return false;
 }
 
-CellInterface::Value Cell::CalculateValuesImpl(std::unordered_set<Position, PositionHasher>& visited) const
+CellInterface::Value Cell::CalculateValuesImpl() const
 {
     if(!child_cells_.empty())
     {
@@ -295,37 +328,9 @@ CellInterface::Value Cell::CalculateValuesImpl(std::unordered_set<Position, Posi
         {
             if(!cell_pos.IsValid())
             {
-                return FormulaError(FormulaError::Category::Ref);
+                cache_ = FormulaError(FormulaError::Category::Ref);
+                return cache_.value();
             }
-            Cell* cell = dynamic_cast<Cell*>(sheet_.GetCell(cell_pos));
-            if(!cell->IsValidCache())
-            {
-                if(visited.find(cell_pos) == visited.end())
-                {
-                    cache_ = cell->CalculateValuesImpl(visited);
-                    if(std::holds_alternative<FormulaError>(cache_.value()))
-                    {
-                        return cache_.value();
-                    }
-                }
-            }
-        }
-    }
-    visited.insert(current_position_);
-    if(impl_->GetText().size() == 0)
-    {
-        return 0.0;
-    }
-    if(!IsTextFormula(impl_->GetText()))
-    {
-        try
-        {
-            double temp_value = std::stod(impl_->GetText());
-            return temp_value;
-        }
-        catch(...)
-        {
-            return FormulaError(FormulaError::Category::Value);
         }
     }
     cache_ = impl_->GetValue();
@@ -342,6 +347,44 @@ bool Cell::IsTextFormula(std::string_view text) const{
         return true;
     }
     return false;
+}
+
+void Cell::EraseParentCellFromAllRefferencedCells()
+{
+    for(auto cell_pos : child_cells_)
+    {
+        EraseRefToThisCellFromChildCell(cell_pos);
+    }
+}
+
+void Cell::EraseRefToThisCellFromChildCell(Position child_cell_pos)
+{
+    auto cell_p = sheet_.GetCell(child_cell_pos);
+    if(cell_p != nullptr)
+    {
+        Cell* point_to_cell = dynamic_cast<Cell*>(cell_p);
+        point_to_cell->parents_cells_.erase(current_position_);
+        if(cell_p->GetText().size() == 0 && point_to_cell->parents_cells_.empty())
+        {
+            //Если ячейка пустая и от неё никто не зависит, то удаляем её.
+            sheet_.ClearCell(child_cell_pos);
+        }
+    }
+}
+
+bool Cell::IsThisCellPartOfFormula() {
+    if(!parents_cells_.empty())
+    {
+        return true;
+    }
+    else
+    {
+        return false;
+    }
+}
+
+bool Cell::IsFormulaCell() {
+    return IsTextFormula(GetText());
 }
 
 std::ostream& operator<<(std::ostream& output, const CellInterface::Value& value) {

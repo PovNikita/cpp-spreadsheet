@@ -106,7 +106,20 @@ void Sheet::ClearCell(Position pos) {
     }
     if(GetCell(pos) != nullptr)
     {
-        sheet_.erase(pos);
+        if(dynamic_cast<Cell*>(GetCell(pos))->IsThisCellPartOfFormula())
+        {
+            //Если ячейка является частью формулы, то просто удаляем содержимое этой ячейки
+            SetCell(pos, "");
+        }
+        else
+        {
+            if(dynamic_cast<Cell*>(GetCell(pos))->IsFormulaCell())
+            {
+                //Если удаляется формульная ячейка, то разрушаются зависимость этой ячейки от других
+                dynamic_cast<Cell*>(GetCell(pos))->EraseParentCellFromAllRefferencedCells();
+            }
+            sheet_.erase(pos);
+        }
         UpdateSize(pos, false);
     }
 }

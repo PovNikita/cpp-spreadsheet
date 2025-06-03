@@ -30,6 +30,3 @@ private:
     std::map<int, int> rows_number_of_elements;
     std::map<int, int> cols_number_of_elements;
 };
-
-
-

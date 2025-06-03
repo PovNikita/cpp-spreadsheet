@@ -273,13 +273,22 @@ public:
             else {
                 try
                 {
-                    temp_value = std::stod(std::get<std::string>(value));
+                    size_t pos = 0;
+                    temp_value = std::stod(std::get<std::string>(value), &pos);
+                    if(pos != std::get<std::string>(value).size())
+                    {
+                        throw FormulaError(FormulaError::Category::Value);
+                    }
                 }
                 catch(...)
                 {
-                    throw std::get<FormulaError>(value);
+                    throw FormulaError(FormulaError::Category::Value);
                 }
             }
+        }
+        else
+        {
+            throw std::get<FormulaError>(value);
         }
         return temp_value;
     }
